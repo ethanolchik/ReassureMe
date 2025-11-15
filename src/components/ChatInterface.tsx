@@ -9,15 +9,7 @@ import {
   generateRecommendation,
 } from '../services/conversationService';
 import type { Message } from '../lib/supabase';
-
-type ConversationState = {
-  symptom?: string;
-  bodyLocation?: string;
-  duration?: string;
-  contextualInfo?: string;
-  conversationPhase: 'initial' | 'symptom' | 'location' | 'duration' | 'context' | 'summary';
-  requiresLocation: boolean;
-};
+import type { ConversationState } from '../services/conversationService';
 
 export default function ChatInterface({ onComplete }: { onComplete: () => void }) {
   const { user } = useAuth();
