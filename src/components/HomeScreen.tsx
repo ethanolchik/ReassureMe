@@ -31,27 +31,58 @@ export default function HomeScreen({ onStartChat, onViewHistory }: HomeScreenPro
           </button>
         </div>
 
-        <div className="bg-white rounded-lg shadow-lg p-8 mb-6">
-          <h2 className="text-3xl font-bold text-gray-900 mb-4">
-            Welcome to Your Health Companion
-          </h2>
-          <p className="text-gray-600 leading-relaxed mb-6">
-            This app helps you track your symptoms and provides guidance on when to seek medical attention.
-            Log any symptoms you're experiencing, and we'll help you understand whether you should see a GP.
-          </p>
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <p className="text-sm text-blue-900">
-              <strong>Important:</strong> This app does not provide medical diagnoses. It's designed to help
-              you keep track of your symptoms and provide general guidance. Always consult with a healthcare
-              professional for medical advice.
+        <div className="grid lg:grid-cols-3 gap-6 mb-6">
+          <div className="bg-white rounded-lg shadow-lg p-8 lg:col-span-2">
+            <h2 className="text-3xl font-bold text-gray-900 mb-4">
+              Welcome to Your Health Companion
+            </h2>
+            <p className="text-gray-600 leading-relaxed mb-6">
+              Log symptoms, capture context, and get guidance on when to seek medical attention. We help you organise your
+              thoughts before speaking with a clinician so you can feel confident and prepared.
             </p>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <p className="text-sm text-blue-900">
+                <strong>Important:</strong> ReassureMe does not provide diagnoses. It helps you record what you're
+                experiencing and offers general support. Always consult a healthcare professional for medical advice.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">How It Works</h3>
+            <div className="space-y-4">
+              <div className="flex gap-3">
+                <div className="flex-shrink-0 w-7 h-7 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">
+                  1
+                </div>
+                <p className="text-gray-700 text-sm leading-relaxed">
+                  <strong>Describe your symptoms</strong> in a conversational flow. The assistant guides you step-by-step so nothing important is missed.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-shrink-0 w-7 h-7 bg-indigo-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">
+                  2
+                </div>
+                <p className="text-gray-700 text-sm leading-relaxed">
+                  <strong>Get personalised guidance</strong> on whether self-care, GP contact, or urgent care is appropriate based on what you share.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-shrink-0 w-7 h-7 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">
+                  3
+                </div>
+                <p className="text-gray-700 text-sm leading-relaxed">
+                  <strong>Share summaries</strong> with clinicians so appointments start with clear, structured information.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
+        <div className="grid md:grid-cols-2 gap-6 items-stretch">
           <button
             onClick={onStartChat}
-            className="group bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition-all duration-200 text-left"
+            className="group bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition-all duration-200 text-left flex flex-col"
           >
             <div className="w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
               <MessageSquarePlus className="w-7 h-7 text-white" />
@@ -65,7 +96,7 @@ export default function HomeScreen({ onStartChat, onViewHistory }: HomeScreenPro
 
           <button
             onClick={onViewHistory}
-            className="group bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition-all duration-200 text-left"
+            className="group bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition-all duration-200 text-left flex flex-col"
           >
             <div className="w-14 h-14 bg-indigo-600 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
               <History className="w-7 h-7 text-white" />
@@ -78,35 +109,6 @@ export default function HomeScreen({ onStartChat, onViewHistory }: HomeScreenPro
           </button>
         </div>
 
-        <div className="mt-8 bg-white rounded-lg shadow-lg p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-3">How It Works</h3>
-          <div className="space-y-3">
-            <div className="flex gap-3">
-              <div className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">
-                1
-              </div>
-              <p className="text-gray-700">
-                <strong>Describe your symptoms:</strong> Have a natural conversation about what you're experiencing
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <div className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">
-                2
-              </div>
-              <p className="text-gray-700">
-                <strong>Get guidance:</strong> Receive advice on whether to see a GP or manage symptoms at home
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <div className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">
-                3
-              </div>
-              <p className="text-gray-700">
-                <strong>Share with your doctor:</strong> Use the generated summaries during GP appointments
-              </p>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );

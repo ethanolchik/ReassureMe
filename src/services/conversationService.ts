@@ -33,8 +33,8 @@ const PHASE_CONFIG: Record<'location' | 'duration' | 'context' | 'severity' | 's
     },
     context: {
       intent:
-        'invite the patient to describe texture, triggers, relieving factors, lifestyle changes, or other qualitative details relevant to clinicians',
-      canonicalQuestion: 'Please tell me more about this symptom.',
+        'invite the patient to describe texture, triggers, relieving factors, lifestyle changes, or other qualitative details relevant to clinicians while explicitly probing for potential background factors (e.g. recent alcohol use for headaches, spoiled food for stomach issues, heavy exercise for muscle pain, travel for stomach bugs)',
+      canonicalQuestion: 'Is there any background or trigger that might have led to this symptom?',
     },
     severity: {
       intent:
@@ -122,6 +122,11 @@ You are a compassionate NHS triage assistant collecting information via a struct
 Respond with JSON only: { "message": "assistant response" }.
 Your job is to ask the canonical question for the upcoming phase, while tailoring the hints/examples to the patient's current details.`.trim();
 
+  const backgroundInstruction =
+    phase === 'context'
+      ? 'Explicitly ask about potential background factors or triggers relevant to the patient’s symptom (e.g. alcohol use for hangover-like headaches, spoiled food for relevant stomach issues, heavy exercise for muscle pain, travel, stress). Tailor the examples to the symptom.'
+      : '';
+
   const userPrompt = `
 Phase to ask about: ${phase}
 Canonical question: ${config.canonicalQuestion}
@@ -134,7 +139,8 @@ Instructions:
 - Keep it under two short paragraphs.
 - Include at least one personalised hint (e.g. refer to cough qualities when the symptom is a cough).
 - Maintain gentle, reassuring NHS tone.
-- Do not ask for information outside of the ${phase} focus.`.trim();
+- Do not ask for information outside of the ${phase} focus.
+${backgroundInstruction}`.trim();
 
   const fallbackMessages: Record<typeof phase, string> = {
     location: 'Where exactly are you experiencing this symptom?',
