@@ -139,9 +139,12 @@ export default function HistoryView({ onBack }: { onBack: () => void }) {
             {selectedSymptom.conversation?.summary && (
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Doctor's Summary</h3>
-                <div className="text-gray-700 bg-blue-50 p-4 rounded-lg border border-blue-100 whitespace-pre-line">
-                  {selectedSymptom.conversation.summary}
-                </div>
+                <div
+                  className="text-gray-700 bg-blue-50 p-4 rounded-lg border border-blue-100 prose prose-sm"
+                  dangerouslySetInnerHTML={{
+                    __html: selectedSymptom.conversation.summary,
+                  }}
+                />
               </div>
             )}
 

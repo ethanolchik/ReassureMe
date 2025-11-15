@@ -46,33 +46,54 @@ function deriveSeverityLevel(symptom?: string, severityText?: string): SeverityL
   const descriptorEntry = Object.entries(descriptorSeverityMap).find(([descriptor]) =>
     lowerSeverity.includes(descriptor)
   );
+  const score = parseSeverityScore(severityText);
+  const lowerSymptom = symptom?.toLowerCase() || '';
+  const isCriticalSymptom = lowerSymptom
+    ? criticalSymptomKeywords.some((keyword) => lowerSymptom.includes(keyword))
+    : false;
+  const isHeadacheSymptom = lowerSymptom
+    ? lowPrioritySymptomKeywords.some((keyword) => lowerSymptom.includes(keyword))
+    : false;
 
-  let level: SeverityLevel = 'medium';
+  let level: SeverityLevel;
 
   if (descriptorEntry) {
     level = descriptorEntry[1];
-  } else {
-    const score = parseSeverityScore(severityText);
-    if (score !== null) {
-      if (score <= 3) level = 'low';
-      else if (score <= 6) level = 'medium';
-      else level = 'high';
-    } else if (lowerSeverity.includes('worse') || lowerSeverity.includes('can\'t cope')) {
-      level = 'high';
-    } else if (lowerSeverity.includes('manageable') || lowerSeverity.includes('mild')) {
+  } else if (score !== null) {
+    if (score <= 4) {
       level = 'low';
+    } else if (score <= 7) {
+      level = 'medium';
+    } else {
+      level = 'high';
+    }
+  } else if (lowerSeverity.includes('manageable') || lowerSeverity.includes('mild')) {
+    level = 'low';
+  } else if (lowerSeverity.includes('worse') || lowerSeverity.includes('can\'t cope')) {
+    level = 'high';
+  } else {
+    level = 'low';
+  }
+
+  if (isCriticalSymptom) {
+    if (score !== null) {
+      if (score >= 7) level = 'high';
+      else if (score >= 4) level = 'medium';
+      else level = 'medium';
+    } else if (level === 'low') {
+      level = 'medium';
+    }
+  } else if (isHeadacheSymptom) {
+    if (score !== null && score <= 5) {
+      level = 'low';
+    } else if (level === 'high' && score !== null && score < 7) {
+      level = 'medium';
     }
   }
 
-  if (symptom) {
-    const lowerSymptom = symptom.toLowerCase();
-    if (criticalSymptomKeywords.some((keyword) => lowerSymptom.includes(keyword))) {
-      level = level === 'low' ? 'medium' : 'high';
-    } else if (
-      lowPrioritySymptomKeywords.some((keyword) => lowerSymptom.includes(keyword)) &&
-      level === 'medium'
-    ) {
-      level = 'low';
+  if (level === 'high' && !isCriticalSymptom) {
+    if (score === null || score < 7) {
+      level = 'medium';
     }
   }
 
