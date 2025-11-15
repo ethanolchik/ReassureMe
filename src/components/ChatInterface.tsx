@@ -545,7 +545,7 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
     );
   };
 
-  if (showSummary) {
+    if (showSummary) {
     return (
       <div className="flex flex-col h-full bg-white rounded-lg shadow-sm">
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -579,17 +579,26 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
           {recommendation && (
             <div className="mb-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-3">Recommendation</h3>
-              <div className={`flex items-start gap-3 p-4 rounded-lg border-2 ${
-                recommendation.urgencyLevel === 'urgent' ? 'border-red-200 bg-red-50' :
-                recommendation.urgencyLevel === 'high' ? 'border-orange-200 bg-orange-50' :
-                recommendation.urgencyLevel === 'medium' ? 'border-yellow-200 bg-yellow-50' :
-                'border-green-200 bg-green-50'
-              }`}>
+              <div
+                className={`flex items-start gap-3 p-4 rounded-lg border-2 ${
+                  recommendation.urgencyLevel === 'urgent'
+                    ? 'border-red-200 bg-red-50'
+                    : recommendation.urgencyLevel === 'high'
+                    ? 'border-orange-200 bg-orange-50'
+                    : recommendation.urgencyLevel === 'medium'
+                    ? 'border-yellow-200 bg-yellow-50'
+                    : 'border-green-200 bg-green-50'
+                }`}
+              >
                 <div className={getUrgencyColor(recommendation.urgencyLevel)}>
                   {getUrgencyIcon(recommendation.urgencyLevel)}
                 </div>
                 <div className="flex-1">
-                  <p className={`font-semibold mb-2 ${getUrgencyColor(recommendation.urgencyLevel)}`}>
+                  <p
+                    className={`font-semibold mb-2 ${getUrgencyColor(
+                      recommendation.urgencyLevel
+                    )}`}
+                  >
                     {recommendation.recommendation}
                   </p>
                   <p className="text-gray-700 text-sm leading-relaxed">
@@ -602,7 +611,7 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
 
           {improvementTips.length > 0 && (
             <div className="border border-green-100 rounded-lg p-4 bg-green-50/60">
-              <h3 className="text-lg Font-semibold text-gray-900 mb-2">Helpful Tips</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Helpful Tips</h3>
               <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
                 {improvementTips.map((tip, index) => (
                   <li key={`${tip}-${index}`}>{tip}</li>
@@ -622,7 +631,8 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
 
           <div className="border-t pt-4">
             <p className="text-sm text-gray-600 mb-4">
-              Does this summary accurately reflect your symptoms? Feel free to edit any information provided before it is added to your record.
+              Does this summary accurately reflect your symptoms? Feel free to edit any information
+              provided before it is added to your record.
             </p>
             <div className="flex gap-3">
               <button
@@ -635,11 +645,9 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
             </div>
           </div>
         </div>
-    </div>
-  );
-}
-}
-
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-white rounded-lg shadow-sm">
@@ -696,3 +704,4 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
       </div>
     </div>
   );
+}
