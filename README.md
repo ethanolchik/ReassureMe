@@ -13,14 +13,6 @@
 
 This platform aims to provide users with a clean, intuitive interface to log, track, and receive helpful insights related to their personal health data, powered by a robust backend.
 
-## ✨ Features (Hypothesized)
-
-* **Secure Authentication:** User sign-up and sign-in powered by Supabase Auth.
-* **Data Logging:** Easily record and track key health metrics or anxiety events.
-* **Data Visualization:** Interactive charts and graphs to visualize progress and patterns over time.
-* **Reassurance Engine:** Provides relevant and personalized summaries or data points to offer comfort or context.
-* **Responsive Design:** A beautiful and accessible interface built with Tailwind CSS.
-
 ## 🛠️ Tech Stack
 
 This project is built using the following technologies:
