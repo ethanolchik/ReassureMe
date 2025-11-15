@@ -1,6 +1,12 @@
 # ReassureMe
 **Smart support for everyday health.**
 
+Our submission for the FYH developed by:
+- Ethan Olchik
+- Yousuf Sayed
+- Elijah Moreira
+- Chloe Caijiayu
+  
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
