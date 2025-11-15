@@ -259,6 +259,20 @@ type RecommendationAIResponse = {
   advice: string;
 };
 
+export type RelatedSymptomInsight = {
+  summary: string;
+  recommendation: string;
+};
+
+type PriorSymptomSnapshot = {
+  symptom_name: string;
+  body_location?: string | null;
+  duration?: string;
+  severity?: string | null;
+  description?: string;
+  created_at: string;
+};
+
 export async function generateRecommendation(
   state: ConversationState,
   context?: { summary?: string; additionalInfo?: string }
@@ -296,6 +310,44 @@ Base your judgement on the details provided. Use UK conventions (999 emergency, 
       urgencyLevel: 'low',
       advice:
         'Keep tracking how you feel, rest, stay hydrated, and book a GP appointment if anything changes or you become more concerned.',
+    };
+  }
+}
+
+export async function generateRelatedSymptomInsight(
+  state: ConversationState,
+  priorSymptoms: PriorSymptomSnapshot[]
+): Promise<RelatedSymptomInsight | null> {
+  if (!priorSymptoms.length) {
+    return null;
+  }
+
+  const systemPrompt = `
+You are an NHS clinician assistant. Determine whether recently logged symptoms might link with the current complaint.
+Return JSON only with schema { "summary": "short paragraph highlighting any links", "recommendation": "actionable suggestion referencing whether to mention to GP, monitor, etc." }`.trim();
+
+  const userPrompt = `
+Current symptom state:
+${JSON.stringify(state, null, 2)}
+
+Recent symptom history (most recent first):
+${JSON.stringify(priorSymptoms, null, 2)}
+
+Highlight patterns (timing, body location, severity) and call out red flags if necessary.`.trim();
+
+  try {
+    const aiResponse = await requestAiResponse(systemPrompt, userPrompt);
+    const parsed = extractJson<RelatedSymptomInsight>(aiResponse);
+    if (!parsed.summary || !parsed.recommendation) {
+      throw new Error('Related symptom insight incomplete');
+    }
+    return parsed;
+  } catch (error) {
+    console.warn('Unable to generate related symptom insight', error);
+    return {
+      summary: 'Recent symptoms were reviewed but no automated linkage could be confirmed.',
+      recommendation:
+        'Share this list with your GP if the pattern feels connected or if symptoms cluster closely together.',
     };
   }
 }

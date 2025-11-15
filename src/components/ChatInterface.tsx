@@ -1,15 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Send, CheckCircle, AlertCircle, Phone } from 'lucide-react';
+import { Send, CheckCircle, AlertCircle, Phone, Pencil } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import {
   generateNextQuestion,
   generateSummary,
   generateRecommendation,
+  generateRelatedSymptomInsight,
 } from '../services/conversationService';
-import type { Message } from '../lib/supabase';
-import type { ConversationState } from '../services/conversationService';
+import type { Message, Symptom } from '../lib/supabase';
+import type {
+  ConversationState,
+  RelatedSymptomInsight,
+} from '../services/conversationService';
+
+type EditableFieldKey = 'symptom' | 'bodyLocation' | 'duration' | 'contextualInfo' | 'severity';
 
 export default function ChatInterface({ onComplete }: { onComplete: () => void }) {
   const { user } = useAuth();
@@ -33,7 +39,18 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
     urgencyLevel: 'low' | 'medium' | 'high' | 'urgent';
     advice: string;
   } | null>(null);
+  const [relatedSymptoms, setRelatedSymptoms] = useState<Symptom[]>([]);
+  const [relatedInsight, setRelatedInsight] = useState<RelatedSymptomInsight | null>(null);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+  const [relatedError, setRelatedError] = useState<string | null>(null);
+  const [finalAdditionalInfo, setFinalAdditionalInfo] = useState<string | undefined>(undefined);
+  const [editingEnabled, setEditingEnabled] = useState(false);
+  const [editingField, setEditingField] = useState<EditableFieldKey | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [updatingSummary, setUpdatingSummary] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const RELATED_LOOKBACK_DAYS = 30;
+  const MAX_RELATED_SYMPTOMS = 5;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -42,6 +59,13 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    if (!editingEnabled) {
+      setEditingField(null);
+      setEditValue('');
+    }
+  }, [editingEnabled]);
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
@@ -91,17 +115,81 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
     }
   };
 
-  const finalizeSummary = async (additionalInfo: string) => {
-    const optionalInfo = additionalInfo || undefined;
-    const generatedSummary = await generateSummary(conversationState, optionalInfo);
-    const rec = await generateRecommendation(conversationState, {
-      summary: generatedSummary,
-      additionalInfo: optionalInfo,
-    });
+  const refreshRelatedInsights = async (stateSnapshot: ConversationState) => {
+    if (!user) {
+      setRelatedSymptoms([]);
+      setRelatedInsight(null);
+      return;
+    }
 
-    setSummary(generatedSummary);
-    setRecommendation(rec);
+    setRelatedLoading(true);
+    setRelatedError(null);
+
+    try {
+      const since = new Date();
+      since.setDate(since.getDate() - RELATED_LOOKBACK_DAYS);
+
+      const { data, error } = await supabase
+        .from('symptoms')
+        .select('id, symptom_name, body_location, duration, description, severity, created_at, updated_at, user_id')
+        .eq('user_id', user.id)
+        .gte('created_at', since.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(MAX_RELATED_SYMPTOMS);
+
+      if (error) throw error;
+
+      const fetched = data || [];
+      setRelatedSymptoms(fetched);
+
+      if (fetched.length === 0) {
+        setRelatedInsight(null);
+        return;
+      }
+
+      const insight = await generateRelatedSymptomInsight(stateSnapshot, fetched);
+      setRelatedInsight(insight);
+    } catch (error) {
+      console.error('Error loading related symptoms:', error);
+      setRelatedSymptoms([]);
+      setRelatedInsight(null);
+      setRelatedError('Unable to load recent symptoms right now.');
+    } finally {
+      setRelatedLoading(false);
+    }
+  };
+
+  const regenerateOutputs = async (
+    stateOverride?: ConversationState,
+    infoOverride?: string | undefined
+  ) => {
+    const targetState = stateOverride || conversationState;
+    const info = infoOverride !== undefined ? infoOverride : finalAdditionalInfo;
+    setUpdatingSummary(true);
+    try {
+      const generatedSummary = await generateSummary(targetState, info);
+      const rec = await generateRecommendation(targetState, {
+        summary: generatedSummary,
+        additionalInfo: info,
+      });
+      setSummary(generatedSummary);
+      setRecommendation(rec);
+      await refreshRelatedInsights(targetState);
+    } catch (error) {
+      console.error('Error regenerating outputs:', error);
+      alert('There was an issue refreshing your summary. Please try again.');
+    } finally {
+      setUpdatingSummary(false);
+    }
+  };
+
+  const finalizeSummary = async (additionalInfo: string) => {
+    const trimmed = additionalInfo.trim();
+    const optionalInfo = trimmed ? trimmed : undefined;
+    setFinalAdditionalInfo(optionalInfo);
+    await regenerateOutputs(conversationState, optionalInfo);
     setShowSummary(true);
+    setEditingEnabled(false);
   };
 
   const confirmAndSave = async () => {
@@ -179,16 +267,165 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
         return <CheckCircle className="w-5 h-5" />;
     }
   };
+  const startEditingField = (field: EditableFieldKey) => {
+    setEditingField(field);
+    setEditValue((conversationState[field] as string) || '');
+  };
+
+  const cancelEditingField = () => {
+    setEditingField(null);
+    setEditValue('');
+  };
+
+  const saveEditedField = async () => {
+    if (!editingField) return;
+    const trimmed = editValue.trim();
+    const updatedState: ConversationState = {
+      ...conversationState,
+      [editingField]: trimmed ? trimmed : undefined,
+    };
+    setConversationState(updatedState);
+    setEditingField(null);
+    setEditValue('');
+    await regenerateOutputs(updatedState);
+  };
+
+  const editableFieldConfig: Array<{
+    key: EditableFieldKey;
+    label: string;
+    placeholder: string;
+    multiline?: boolean;
+  }> = [
+    {
+      key: 'symptom',
+      label: 'Symptom',
+      placeholder: 'Describe your main symptom',
+    },
+    {
+      key: 'bodyLocation',
+      label: 'Location',
+      placeholder: 'Where on your body do you feel this?',
+    },
+    {
+      key: 'duration',
+      label: 'Duration',
+      placeholder: 'How long has this been going on?',
+    },
+    {
+      key: 'contextualInfo',
+      label: 'Additional Details',
+      placeholder: 'Include triggers, patterns, or anything else helpful',
+      multiline: true,
+    },
+    {
+      key: 'severity',
+      label: 'Severity (1-10)',
+      placeholder: 'e.g. 6/10, throbbing in waves',
+    },
+  ];
+
+  const renderEditableField = (fieldKey: EditableFieldKey) => {
+    const field = editableFieldConfig.find((f) => f.key === fieldKey);
+    if (!field) return null;
+    if (fieldKey === 'bodyLocation' && !conversationState.requiresLocation && !conversationState.bodyLocation) {
+      return null;
+    }
+
+    const currentValue = (conversationState[fieldKey] as string) || '';
+    const isActive = editingField === fieldKey;
+    const isMultiline = Boolean(field.multiline);
+
+    return (
+      <div key={fieldKey} className="border border-gray-200 rounded-lg p-4 bg-white shadow-sm">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">{field.label}</p>
+            {isActive ? (
+              <div className="space-y-3">
+                {isMultiline ? (
+                  <textarea
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    rows={4}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder={field.placeholder}
+                    disabled={updatingSummary}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder={field.placeholder}
+                    disabled={updatingSummary}
+                  />
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={saveEditedField}
+                    disabled={updatingSummary}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={cancelEditingField}
+                    disabled={updatingSummary}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-gray-900 whitespace-pre-line">
+                {currentValue || <span className="text-gray-500">Not provided yet.</span>}
+              </p>
+            )}
+          </div>
+          {editingEnabled && !isActive && (
+            <button
+              onClick={() => startEditingField(fieldKey)}
+              className="text-gray-500 hover:text-blue-600 transition-colors"
+              aria-label={`Edit ${field.label}`}
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   if (showSummary) {
     return (
       <div className="flex flex-col h-full bg-white rounded-lg shadow-sm">
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
           <h2 className="text-2xl font-semibold text-gray-900 mb-4">Summary for Your Doctor</h2>
 
-          <div className="prose prose-sm max-w-none mb-6">
-            <div className="whitespace-pre-line text-gray-700 bg-gray-50 p-4 rounded-lg">
-              {summary}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold text-gray-900">Review Your Answers</h3>
+              <button
+                onClick={() => setEditingEnabled((prev) => !prev)}
+                className="text-sm font-medium text-blue-600 hover:text-blue-700"
+              >
+                {editingEnabled ? 'Done Editing' : 'Edit Responses'}
+              </button>
+            </div>
+            <div className="space-y-3">
+              {renderEditableField('symptom')}
+              {renderEditableField('bodyLocation')}
+              {renderEditableField('duration')}
+              {renderEditableField('contextualInfo')}
+              {renderEditableField('severity')}
+            </div>
+          </div>
+
+          <div className="prose prose-sm max-w-none">
+            <div className="whitespace-pre-line text-gray-700 bg-gray-50 p-4 rounded-lg border border-gray-200">
+              {updatingSummary ? 'Updating summary...' : summary}
             </div>
           </div>
 
@@ -216,6 +453,53 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
             </div>
           )}
 
+          <div className="border border-indigo-100 rounded-lg p-4 bg-indigo-50/40">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Recent Symptoms (last {RELATED_LOOKBACK_DAYS} days)
+              </h3>
+              {relatedLoading && (
+                <span className="text-xs text-gray-500">Checking history...</span>
+              )}
+            </div>
+            {relatedError && (
+              <p className="text-sm text-red-600 mb-3">{relatedError}</p>
+            )}
+            {relatedSymptoms.length === 0 && !relatedLoading && !relatedError ? (
+              <p className="text-sm text-gray-600">
+                No other symptoms logged in the past {RELATED_LOOKBACK_DAYS} days.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {relatedSymptoms.map((symptom) => (
+                  <li
+                    key={symptom.id}
+                    className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm"
+                  >
+                    <div className="flex justify-between text-sm text-gray-500 mb-1">
+                      <span>{new Date(symptom.created_at).toLocaleDateString()}</span>
+                      {symptom.severity && <span>Severity: {symptom.severity}</span>}
+                    </div>
+                    <p className="font-semibold text-gray-900">{symptom.symptom_name}</p>
+                    {symptom.body_location && (
+                      <p className="text-sm text-gray-700">Location: {symptom.body_location}</p>
+                    )}
+                    <p className="text-sm text-gray-700">
+                      Duration: {symptom.duration || 'Not noted'}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {relatedInsight && (
+              <div className="mt-4 bg-white border border-indigo-100 rounded-lg p-3">
+                <p className="text-sm text-gray-900 font-semibold mb-1">How they might link</p>
+                <p className="text-sm text-gray-700 mb-2">{relatedInsight.summary}</p>
+                <p className="text-sm text-indigo-700 font-medium">{relatedInsight.recommendation}</p>
+              </div>
+            )}
+          </div>
+
           <div className="border-t pt-4">
             <p className="text-sm text-gray-600 mb-4">
               Does this summary accurately reflect your symptoms? If yes, I'll save this to your health record.
@@ -223,17 +507,17 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
             <div className="flex gap-3">
               <button
                 onClick={confirmAndSave}
-                disabled={loading}
+                disabled={loading || updatingSummary || editingField !== null}
                 className="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {loading ? 'Saving...' : 'Confirm & Save'}
               </button>
               <button
-                onClick={() => setShowSummary(false)}
-                disabled={loading}
+                onClick={() => setEditingEnabled((prev) => !prev)}
+                disabled={loading || updatingSummary}
                 className="px-6 py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                Edit
+                {editingEnabled ? 'Done Editing' : 'Edit Responses'}
               </button>
             </div>
           </div>
