@@ -44,13 +44,65 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [relatedError, setRelatedError] = useState<string | null>(null);
   const [finalAdditionalInfo, setFinalAdditionalInfo] = useState<string | undefined>(undefined);
-  const [editingEnabled, setEditingEnabled] = useState(false);
   const [editingField, setEditingField] = useState<EditableFieldKey | null>(null);
   const [editValue, setEditValue] = useState('');
   const [updatingSummary, setUpdatingSummary] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const RELATED_LOOKBACK_DAYS = 30;
-  const MAX_RELATED_SYMPTOMS = 5;
+  const LINK_WINDOW_DAYS = 14;
+  const MAX_RELATED_SYMPTOMS = 8;
+  const MAX_LINKED_SYMPTOMS = 3;
+
+  const isSeverityClose = (currentSeverity?: string, previousSeverity?: string | null) => {
+    if (!currentSeverity || !previousSeverity) return false;
+    const currentNumber = parseInt(currentSeverity, 10);
+    const prevNumber = parseInt(previousSeverity, 10);
+    if (Number.isNaN(currentNumber) || Number.isNaN(prevNumber)) return false;
+    return Math.abs(currentNumber - prevNumber) <= 2;
+  };
+
+  const hasTokenOverlap = (currentSymptom?: string, previousSymptom?: string) => {
+    if (!currentSymptom || !previousSymptom) return false;
+    const sanitize = (value: string) =>
+      value
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((token) => token.length >= 4);
+    const currentTokens = sanitize(currentSymptom);
+    const prevTokens = sanitize(previousSymptom || '');
+    if (!currentTokens.length || !prevTokens.length) return false;
+    return currentTokens.some((token) => prevTokens.includes(token));
+  };
+
+  const hasLocationOverlap = (currentLocation?: string, previousLocation?: string | null) => {
+    if (!currentLocation || !previousLocation) return false;
+    const current = currentLocation.toLowerCase();
+    const previous = previousLocation.toLowerCase();
+    return current.includes(previous) || previous.includes(current);
+  };
+
+  const isWithinLinkWindow = (createdAt: string) => {
+    const created = new Date(createdAt);
+    const now = new Date();
+    const diffMs = Math.abs(now.getTime() - created.getTime());
+    const diffDays = diffMs / (1000 * 60 * 60 * 24);
+    return diffDays <= LINK_WINDOW_DAYS;
+  };
+
+  const filterRelevantSymptoms = (stateSnapshot: ConversationState, candidates: Symptom[]) => {
+    return candidates
+      .filter((symptom) => {
+        const nameLink = hasTokenOverlap(stateSnapshot.symptom, symptom.symptom_name);
+        const locationLink = hasLocationOverlap(stateSnapshot.bodyLocation, symptom.body_location);
+        const severityLink = isSeverityClose(stateSnapshot.severity, symptom.severity);
+        const timeLink = isWithinLinkWindow(symptom.created_at);
+        if (locationLink) return true;
+        if (nameLink && timeLink) return true;
+        if (timeLink && severityLink) return true;
+        return false;
+      })
+      .slice(0, MAX_LINKED_SYMPTOMS);
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -59,13 +111,6 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-
-  useEffect(() => {
-    if (!editingEnabled) {
-      setEditingField(null);
-      setEditValue('');
-    }
-  }, [editingEnabled]);
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
@@ -140,14 +185,15 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
       if (error) throw error;
 
       const fetched = data || [];
-      setRelatedSymptoms(fetched);
+      const relevant = filterRelevantSymptoms(stateSnapshot, fetched);
+      setRelatedSymptoms(relevant);
 
-      if (fetched.length === 0) {
+      if (relevant.length === 0) {
         setRelatedInsight(null);
         return;
       }
 
-      const insight = await generateRelatedSymptomInsight(stateSnapshot, fetched);
+      const insight = await generateRelatedSymptomInsight(stateSnapshot, relevant);
       setRelatedInsight(insight);
     } catch (error) {
       console.error('Error loading related symptoms:', error);
@@ -189,7 +235,6 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
     setFinalAdditionalInfo(optionalInfo);
     await regenerateOutputs(conversationState, optionalInfo);
     setShowSummary(true);
-    setEditingEnabled(false);
   };
 
   const confirmAndSave = async () => {
@@ -384,7 +429,7 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
               </p>
             )}
           </div>
-          {editingEnabled && !isActive && (
+          {!isActive && (
             <button
               onClick={() => startEditingField(fieldKey)}
               className="text-gray-500 hover:text-blue-600 transition-colors"
@@ -407,12 +452,6 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-lg font-semibold text-gray-900">Review Your Answers</h3>
-              <button
-                onClick={() => setEditingEnabled((prev) => !prev)}
-                className="text-sm font-medium text-blue-600 hover:text-blue-700"
-              >
-                {editingEnabled ? 'Done Editing' : 'Edit Responses'}
-              </button>
             </div>
             <div className="space-y-3">
               {renderEditableField('symptom')}
@@ -511,13 +550,6 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
                 className="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {loading ? 'Saving...' : 'Confirm & Save'}
-              </button>
-              <button
-                onClick={() => setEditingEnabled((prev) => !prev)}
-                disabled={loading || updatingSummary}
-                className="px-6 py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {editingEnabled ? 'Done Editing' : 'Edit Responses'}
               </button>
             </div>
           </div>
