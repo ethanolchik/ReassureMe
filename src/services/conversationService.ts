@@ -216,14 +216,26 @@ export async function generateNextQuestion(
   return { message, newState, phase: nextPhase };
 }
 
+type SummaryAIResponse = {
+  summary: string;
+  tips?: string[];
+};
+
 export async function generateSummary(
   state: ConversationState,
   additionalInfo?: string
-): Promise<string> {
+): Promise<{ html: string; tips: string[] }> {
   const systemPrompt = `
 You are summarising a patient's symptoms for their clinician.
-Respond with JSON only and schema { "summary": "markdown" }.
-Include: chief complaint, location, duration, contextual factors, severity, and any extra details supplied at the end.`.trim();
+Return JSON only using schema:
+{
+  "summary": "<div> HTML summary suitable for embedding directly </div>",
+  "tips": ["<optional short improvement tip>", "..."]
+}
+Summary requirements:
+- Use semantic HTML tags (<section>, <p>, <ul>, etc.) instead of markdown.
+- Include chief complaint, location (if provided), duration, severity, contextual factors, and extra patient info.
+- Tips (if provided) should be focused, actionable self-care or tracking ideas (max 3 tips).`.trim();
 
   const userPrompt = `
 Patient details:
@@ -235,21 +247,30 @@ Keep the summary concise but thorough enough for a GP to skim quickly.`.trim();
 
   try {
     const aiResponse = await requestAiResponse(systemPrompt, userPrompt);
-    const parsed = extractJson<{ summary: string }>(aiResponse);
+    const parsed = extractJson<SummaryAIResponse>(aiResponse);
     if (!parsed.summary) throw new Error('Summary missing text');
-    return parsed.summary;
+    return { html: parsed.summary, tips: parsed.tips || [] };
   } catch (error) {
     console.warn('Falling back to templated summary', error);
-    return `
-**Symptom Summary**
+    const fallbackHtml = `
+<section>
+  <h3>Symptom Summary</h3>
+  <p><strong>Chief Complaint:</strong> ${state.symptom || 'Not provided'}</p>
+  ${state.bodyLocation ? `<p><strong>Location:</strong> ${state.bodyLocation}</p>` : ''}
+  <p><strong>Duration:</strong> ${state.duration || 'Not provided'}</p>
+  <p><strong>Severity:</strong> ${state.severity || 'Not provided'}</p>
+  <p><strong>Details shared:</strong> ${state.contextualInfo || 'No additional context provided.'}</p>
+  ${additionalInfo ? `<p><strong>Further Information:</strong> ${additionalInfo}</p>` : ''}
+</section>
+`.trim();
 
-**Chief Complaint:** ${state.symptom || 'Not provided'}
-${state.bodyLocation ? `\n**Location:** ${state.bodyLocation}` : ''}
-\n**Duration:** ${state.duration || 'Not provided'}
-\n**Severity:** ${state.severity || 'Not provided'}
-\n**Details shared:** ${state.contextualInfo || 'No additional context provided.'}${
-      additionalInfo ? `\n\n**Further Information:** ${additionalInfo}` : ''
-    }`;
+    return {
+      html: fallbackHtml,
+      tips: [
+        'Keep logging symptoms daily so your clinician can spot patterns.',
+        'Stay hydrated and rest as needed while monitoring changes.',
+      ],
+    };
   }
 }
 
@@ -262,9 +283,11 @@ type RecommendationAIResponse = {
 export type RelatedSymptomInsight = {
   summary: string;
   recommendation: string;
+  linkedSymptomIds: string[];
 };
 
 type PriorSymptomSnapshot = {
+  id: string;
   symptom_name: string;
   body_location?: string | null;
   duration?: string;
@@ -323,8 +346,14 @@ export async function generateRelatedSymptomInsight(
   }
 
   const systemPrompt = `
-You are an NHS clinician assistant. Determine whether recently logged symptoms might link with the current complaint.
-Return JSON only with schema { "summary": "short paragraph highlighting any links", "recommendation": "actionable suggestion referencing whether to mention to GP, monitor, etc." }`.trim();
+You are an NHS clinician assistant. Assess whether recent symptoms likely stem from the same underlying disease as the current complaint.
+Return JSON only using schema:
+{
+  "summary": "<short paragraph describing any suspected linkage>",
+  "recommendation": "<actionable next step>",
+  "linkedSymptomIds": ["<id>", "..."] // only include IDs that plausibly share the same disease process
+}
+Only mark symptoms as linked if the pathology could reasonably be the same. Do not link symptoms purely because they overlap in time.`.trim();
 
   const userPrompt = `
 Current symptom state:
@@ -338,7 +367,7 @@ Highlight patterns (timing, body location, severity) and call out red flags if n
   try {
     const aiResponse = await requestAiResponse(systemPrompt, userPrompt);
     const parsed = extractJson<RelatedSymptomInsight>(aiResponse);
-    if (!parsed.summary || !parsed.recommendation) {
+    if (!parsed.summary || !parsed.recommendation || !Array.isArray(parsed.linkedSymptomIds)) {
       throw new Error('Related symptom insight incomplete');
     }
     return parsed;
@@ -347,7 +376,8 @@ Highlight patterns (timing, body location, severity) and call out red flags if n
     return {
       summary: 'Recent symptoms were reviewed but no automated linkage could be confirmed.',
       recommendation:
-        'Share this list with your GP if the pattern feels connected or if symptoms cluster closely together.',
+        'Share this list with your GP if you notice a recurring pattern or if symptoms cluster closely together.',
+      linkedSymptomIds: [],
     };
   }
 }

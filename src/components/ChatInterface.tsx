@@ -16,6 +16,68 @@ import type {
 } from '../services/conversationService';
 
 type EditableFieldKey = 'symptom' | 'bodyLocation' | 'duration' | 'contextualInfo' | 'severity';
+type SeverityLevel = 'low' | 'medium' | 'high';
+
+const descriptorSeverityMap: Record<string, SeverityLevel> = {
+  mild: 'low',
+  light: 'low',
+  moderate: 'medium',
+  'moderate-to-severe': 'high',
+  severe: 'high',
+  intense: 'high',
+};
+
+const criticalSymptomKeywords = ['chest', 'breath', 'breathing', 'vision', 'speech', 'numb arm'];
+const lowPrioritySymptomKeywords = ['headache', 'migraine', 'tension headache'];
+
+function parseSeverityScore(severityText?: string): number | null {
+  if (!severityText) return null;
+  const match = severityText.match(/(\d+(\.\d+)?)/);
+  if (!match) return null;
+  let value = parseFloat(match[1]);
+  if (Number.isNaN(value)) return null;
+  if (value > 10) value = 10;
+  if (value < 0) value = 0;
+  return value;
+}
+
+function deriveSeverityLevel(symptom?: string, severityText?: string): SeverityLevel {
+  const lowerSeverity = severityText?.toLowerCase() || '';
+  const descriptorEntry = Object.entries(descriptorSeverityMap).find(([descriptor]) =>
+    lowerSeverity.includes(descriptor)
+  );
+
+  let level: SeverityLevel = 'medium';
+
+  if (descriptorEntry) {
+    level = descriptorEntry[1];
+  } else {
+    const score = parseSeverityScore(severityText);
+    if (score !== null) {
+      if (score <= 3) level = 'low';
+      else if (score <= 6) level = 'medium';
+      else level = 'high';
+    } else if (lowerSeverity.includes('worse') || lowerSeverity.includes('can\'t cope')) {
+      level = 'high';
+    } else if (lowerSeverity.includes('manageable') || lowerSeverity.includes('mild')) {
+      level = 'low';
+    }
+  }
+
+  if (symptom) {
+    const lowerSymptom = symptom.toLowerCase();
+    if (criticalSymptomKeywords.some((keyword) => lowerSymptom.includes(keyword))) {
+      level = level === 'low' ? 'medium' : 'high';
+    } else if (
+      lowPrioritySymptomKeywords.some((keyword) => lowerSymptom.includes(keyword)) &&
+      level === 'medium'
+    ) {
+      level = 'low';
+    }
+  }
+
+  return level;
+}
 
 export default function ChatInterface({ onComplete }: { onComplete: () => void }) {
   const { user } = useAuth();
@@ -44,65 +106,13 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [relatedError, setRelatedError] = useState<string | null>(null);
   const [finalAdditionalInfo, setFinalAdditionalInfo] = useState<string | undefined>(undefined);
+  const [improvementTips, setImprovementTips] = useState<string[]>([]);
   const [editingField, setEditingField] = useState<EditableFieldKey | null>(null);
   const [editValue, setEditValue] = useState('');
   const [updatingSummary, setUpdatingSummary] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const RELATED_LOOKBACK_DAYS = 30;
-  const LINK_WINDOW_DAYS = 14;
-  const MAX_RELATED_SYMPTOMS = 8;
-  const MAX_LINKED_SYMPTOMS = 3;
-
-  const isSeverityClose = (currentSeverity?: string, previousSeverity?: string | null) => {
-    if (!currentSeverity || !previousSeverity) return false;
-    const currentNumber = parseInt(currentSeverity, 10);
-    const prevNumber = parseInt(previousSeverity, 10);
-    if (Number.isNaN(currentNumber) || Number.isNaN(prevNumber)) return false;
-    return Math.abs(currentNumber - prevNumber) <= 2;
-  };
-
-  const hasTokenOverlap = (currentSymptom?: string, previousSymptom?: string) => {
-    if (!currentSymptom || !previousSymptom) return false;
-    const sanitize = (value: string) =>
-      value
-        .toLowerCase()
-        .split(/[^a-z0-9]+/)
-        .filter((token) => token.length >= 4);
-    const currentTokens = sanitize(currentSymptom);
-    const prevTokens = sanitize(previousSymptom || '');
-    if (!currentTokens.length || !prevTokens.length) return false;
-    return currentTokens.some((token) => prevTokens.includes(token));
-  };
-
-  const hasLocationOverlap = (currentLocation?: string, previousLocation?: string | null) => {
-    if (!currentLocation || !previousLocation) return false;
-    const current = currentLocation.toLowerCase();
-    const previous = previousLocation.toLowerCase();
-    return current.includes(previous) || previous.includes(current);
-  };
-
-  const isWithinLinkWindow = (createdAt: string) => {
-    const created = new Date(createdAt);
-    const now = new Date();
-    const diffMs = Math.abs(now.getTime() - created.getTime());
-    const diffDays = diffMs / (1000 * 60 * 60 * 24);
-    return diffDays <= LINK_WINDOW_DAYS;
-  };
-
-  const filterRelevantSymptoms = (stateSnapshot: ConversationState, candidates: Symptom[]) => {
-    return candidates
-      .filter((symptom) => {
-        const nameLink = hasTokenOverlap(stateSnapshot.symptom, symptom.symptom_name);
-        const locationLink = hasLocationOverlap(stateSnapshot.bodyLocation, symptom.body_location);
-        const severityLink = isSeverityClose(stateSnapshot.severity, symptom.severity);
-        const timeLink = isWithinLinkWindow(symptom.created_at);
-        if (locationLink) return true;
-        if (nameLink && timeLink) return true;
-        if (timeLink && severityLink) return true;
-        return false;
-      })
-      .slice(0, MAX_LINKED_SYMPTOMS);
-  };
+  const MAX_RECENT_SYMPTOMS = 8;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -180,20 +190,29 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
         .eq('user_id', user.id)
         .gte('created_at', since.toISOString())
         .order('created_at', { ascending: false })
-        .limit(MAX_RELATED_SYMPTOMS);
+        .limit(MAX_RECENT_SYMPTOMS);
 
       if (error) throw error;
 
       const fetched = data || [];
-      const relevant = filterRelevantSymptoms(stateSnapshot, fetched);
-      setRelatedSymptoms(relevant);
+      setRelatedSymptoms(fetched);
 
-      if (relevant.length === 0) {
+      if (fetched.length === 0) {
         setRelatedInsight(null);
         return;
       }
 
-      const insight = await generateRelatedSymptomInsight(stateSnapshot, relevant);
+      const priorSnapshots = fetched.map((symptom) => ({
+        id: symptom.id,
+        symptom_name: symptom.symptom_name,
+        body_location: symptom.body_location,
+        duration: symptom.duration,
+        severity: symptom.severity,
+        description: symptom.description,
+        created_at: symptom.created_at,
+      }));
+
+      const insight = await generateRelatedSymptomInsight(stateSnapshot, priorSnapshots);
       setRelatedInsight(insight);
     } catch (error) {
       console.error('Error loading related symptoms:', error);
@@ -213,12 +232,13 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
     const info = infoOverride !== undefined ? infoOverride : finalAdditionalInfo;
     setUpdatingSummary(true);
     try {
-      const generatedSummary = await generateSummary(targetState, info);
+      const summaryPayload = await generateSummary(targetState, info);
       const rec = await generateRecommendation(targetState, {
-        summary: generatedSummary,
+        summary: summaryPayload.html,
         additionalInfo: info,
       });
-      setSummary(generatedSummary);
+      setSummary(summaryPayload.html);
+      setImprovementTips(summaryPayload.tips);
       setRecommendation(rec);
       await refreshRelatedInsights(targetState);
     } catch (error) {
@@ -241,6 +261,7 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
     if (!user) return;
 
     setLoading(true);
+    const derivedSeverity = deriveSeverityLevel(conversationState.symptom, conversationState.severity);
 
     try {
       const { data: symptomData, error: symptomError } = await supabase
@@ -251,7 +272,7 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
           body_location: conversationState.bodyLocation || null,
           duration: conversationState.duration || '',
           description: conversationState.contextualInfo || '',
-          severity: recommendation?.urgencyLevel || 'low',
+          severity: derivedSeverity,
         })
         .select()
         .maybeSingle();
@@ -333,6 +354,87 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
     setEditingField(null);
     setEditValue('');
     await regenerateOutputs(updatedState);
+  };
+
+  const renderRelatedSymptoms = () => {
+    if (relatedLoading) {
+      return (
+        <p className="text-sm text-gray-600">
+          Checking for possible links with your recent symptoms...
+        </p>
+      );
+    }
+
+    if (relatedError) {
+      return <p className="text-sm text-red-600">{relatedError}</p>;
+    }
+
+    if (relatedSymptoms.length === 0) {
+      return (
+        <p className="text-sm text-gray-600">
+          No other symptoms logged in the past {RELATED_LOOKBACK_DAYS} days.
+        </p>
+      );
+    }
+
+    const linkedIdSet = new Set(relatedInsight?.linkedSymptomIds ?? []);
+    const linkedList = relatedSymptoms.filter((symptom) => linkedIdSet.has(symptom.id));
+    const otherList = relatedSymptoms.filter((symptom) => !linkedIdSet.has(symptom.id));
+
+    const renderList = (list: Symptom[]) => (
+      <ul className="space-y-3">
+        {list.map((symptom) => (
+          <li
+            key={symptom.id}
+            className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm"
+          >
+            <div className="flex justify-between text-sm text-gray-500 mb-1">
+              <span>{new Date(symptom.created_at).toLocaleDateString()}</span>
+              {symptom.severity && <span>Severity: {symptom.severity}</span>}
+            </div>
+            <p className="font-semibold text-gray-900">{symptom.symptom_name}</p>
+            {symptom.body_location && (
+              <p className="text-sm text-gray-700">Location: {symptom.body_location}</p>
+            )}
+            <p className="text-sm text-gray-700">
+              Duration: {symptom.duration || 'Not noted'}
+            </p>
+          </li>
+        ))}
+      </ul>
+    );
+
+    return (
+      <div className="space-y-4">
+        <div>
+          <h4 className="text-sm font-semibold text-gray-900 mb-2">
+            Potentially linked symptoms
+          </h4>
+          {linkedList.length > 0 ? (
+            renderList(linkedList)
+          ) : (
+            <p className="text-sm text-gray-600">
+              None of your recent symptoms appear related to the current issue.
+            </p>
+          )}
+        </div>
+        {otherList.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold text-gray-900 mb-2">
+              Other recent symptoms
+            </h4>
+            {renderList(otherList)}
+          </div>
+        )}
+        {relatedInsight && (
+          <div className="bg-white border border-indigo-100 rounded-lg p-3">
+            <p className="text-sm text-gray-900 font-semibold mb-1">Clinician guidance</p>
+            <p className="text-sm text-gray-700 mb-2">{relatedInsight.summary}</p>
+            <p className="text-sm text-indigo-700 font-medium">{relatedInsight.recommendation}</p>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const editableFieldConfig: Array<{
@@ -462,10 +564,16 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
             </div>
           </div>
 
-          <div className="prose prose-sm max-w-none">
-            <div className="whitespace-pre-line text-gray-700 bg-gray-50 p-4 rounded-lg border border-gray-200">
-              {updatingSummary ? 'Updating summary...' : summary}
-            </div>
+          <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">Symptom Summary</h3>
+            <div
+              className="text-gray-700 text-sm leading-relaxed space-y-2"
+              dangerouslySetInnerHTML={{
+                __html: updatingSummary
+                  ? '<p>Updating summary...</p>'
+                  : summary || '<p>No summary available.</p>',
+              }}
+            />
           </div>
 
           {recommendation && (
@@ -492,56 +600,29 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
             </div>
           )}
 
+          {improvementTips.length > 0 && (
+            <div className="border border-green-100 rounded-lg p-4 bg-green-50/60">
+              <h3 className="text-lg Font-semibold text-gray-900 mb-2">Helpful Tips</h3>
+              <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
+                {improvementTips.map((tip, index) => (
+                  <li key={`${tip}-${index}`}>{tip}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="border border-indigo-100 rounded-lg p-4 bg-indigo-50/40">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-lg font-semibold text-gray-900">
                 Recent Symptoms (last {RELATED_LOOKBACK_DAYS} days)
               </h3>
-              {relatedLoading && (
-                <span className="text-xs text-gray-500">Checking history...</span>
-              )}
             </div>
-            {relatedError && (
-              <p className="text-sm text-red-600 mb-3">{relatedError}</p>
-            )}
-            {relatedSymptoms.length === 0 && !relatedLoading && !relatedError ? (
-              <p className="text-sm text-gray-600">
-                No other symptoms logged in the past {RELATED_LOOKBACK_DAYS} days.
-              </p>
-            ) : (
-              <ul className="space-y-3">
-                {relatedSymptoms.map((symptom) => (
-                  <li
-                    key={symptom.id}
-                    className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm"
-                  >
-                    <div className="flex justify-between text-sm text-gray-500 mb-1">
-                      <span>{new Date(symptom.created_at).toLocaleDateString()}</span>
-                      {symptom.severity && <span>Severity: {symptom.severity}</span>}
-                    </div>
-                    <p className="font-semibold text-gray-900">{symptom.symptom_name}</p>
-                    {symptom.body_location && (
-                      <p className="text-sm text-gray-700">Location: {symptom.body_location}</p>
-                    )}
-                    <p className="text-sm text-gray-700">
-                      Duration: {symptom.duration || 'Not noted'}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {relatedInsight && (
-              <div className="mt-4 bg-white border border-indigo-100 rounded-lg p-3">
-                <p className="text-sm text-gray-900 font-semibold mb-1">How they might link</p>
-                <p className="text-sm text-gray-700 mb-2">{relatedInsight.summary}</p>
-                <p className="text-sm text-indigo-700 font-medium">{relatedInsight.recommendation}</p>
-              </div>
-            )}
+            {renderRelatedSymptoms()}
           </div>
 
           <div className="border-t pt-4">
             <p className="text-sm text-gray-600 mb-4">
-              Does this summary accurately reflect your symptoms? If yes, I'll save this to your health record.
+              Does this summary accurately reflect your symptoms? Feel free to edit any information provided before it is added to your record.
             </p>
             <div className="flex gap-3">
               <button
@@ -554,9 +635,11 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
             </div>
           </div>
         </div>
-      </div>
-    );
-  }
+    </div>
+  );
+}
+}
+
 
   return (
     <div className="flex flex-col h-full bg-white rounded-lg shadow-sm">
@@ -613,4 +696,3 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
       </div>
     </div>
   );
-}
