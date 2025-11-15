@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import type { KeyboardEvent } from 'react';
 import { Send, CheckCircle, AlertCircle, Phone } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -37,7 +38,7 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
   const [summary, setSummary] = useState('');
   const [recommendation, setRecommendation] = useState<{
     recommendation: string;
-    urgencyLevel: string;
+    urgencyLevel: 'low' | 'medium' | 'high' | 'urgent';
     advice: string;
   } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -63,33 +64,52 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
     setInput('');
     setLoading(true);
 
-    if (conversationState.conversationPhase === 'summary') {
-      const additionalInfo = input.trim();
-      await finalizeSummary(additionalInfo);
-    } else {
-      const { message, newState } = generateNextQuestion(conversationState, input.trim());
+    try {
+      if (conversationState.conversationPhase === 'summary') {
+        await finalizeSummary(userMessage.content);
+        return;
+      }
 
-      setTimeout(() => {
-        const assistantMessage: Message = {
+      const { message, newState } = await generateNextQuestion(
+        conversationState,
+        userMessage.content
+      );
+
+      const assistantMessage: Message = {
+        role: 'assistant',
+        content: message,
+        timestamp: new Date().toISOString(),
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+      setConversationState(newState);
+    } catch (error) {
+      console.error('Error generating next question:', error);
+      setMessages((prev) => [
+        ...prev,
+        {
           role: 'assistant',
-          content: message,
+          content:
+            "I'm sorry, I'm having trouble generating the next question right now. Let's continue with a simple question: What other details about your symptom would you like to share?",
           timestamp: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, assistantMessage]);
-        setConversationState(newState);
-        setLoading(false);
-      }, 800);
+        },
+      ]);
+    } finally {
+      setLoading(false);
     }
   };
 
   const finalizeSummary = async (additionalInfo: string) => {
-    const generatedSummary = generateSummary(conversationState, additionalInfo || undefined);
-    const rec = generateRecommendation(conversationState);
+    const optionalInfo = additionalInfo || undefined;
+    const generatedSummary = await generateSummary(conversationState, optionalInfo);
+    const rec = await generateRecommendation(conversationState, {
+      summary: generatedSummary,
+      additionalInfo: optionalInfo,
+    });
 
     setSummary(generatedSummary);
     setRecommendation(rec);
     setShowSummary(true);
-    setLoading(false);
   };
 
   const confirmAndSave = async () => {
@@ -136,7 +156,7 @@ export default function ChatInterface({ onComplete }: { onComplete: () => void }
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
