@@ -1,3 +1,5 @@
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
 export type ConversationState = {
   symptom?: string;
   bodyLocation?: string;
@@ -10,8 +12,7 @@ export type ConversationState = {
 
 const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
 const geminiModel = import.meta.env.VITE_GEMINI_MODEL || 'gemini-1.5-pro';
-const geminiBaseUrl =
-  import.meta.env.VITE_GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
+const genAI = geminiApiKey ? new GoogleGenerativeAI(geminiApiKey) : null;
 
 type PhaseConfig = {
   intent: string;
@@ -47,46 +48,24 @@ const PHASE_CONFIG: Record<'location' | 'duration' | 'context' | 'severity' | 's
   };
 
 async function requestAiResponse(systemPrompt: string, userPrompt: string): Promise<string> {
-  if (!geminiApiKey) {
+  if (!genAI) {
     throw new Error('Missing Gemini API key');
   }
 
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: userPrompt },
-  ];
+  const model = genAI.getGenerativeModel({
+    model: geminiModel,
+    systemInstruction: systemPrompt,
+  });
 
-  const [systemMessage] = messages;
-  const chatMessages = messages.slice(1).map((message) => ({
-    role: message.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: message.content }],
-  }));
+  const result = await model.generateContent({
+    contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+    generationConfig: {
+      temperature: 0.2,
+      responseMimeType: 'application/json',
+    },
+  });
 
-  const response = await fetch(
-    `${geminiBaseUrl}/models/${geminiModel}:generateContent?key=${geminiApiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: chatMessages,
-        system_instruction: {
-          role: 'system',
-          parts: [{ text: systemMessage.content }],
-        },
-        generationConfig: {
-          temperature: 0.2,
-        },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Gemini request failed: ${errorBody}`);
-  }
-
-  const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  const text = result.response.text();
   if (!text) {
     throw new Error('Gemini response missing content');
   }
